@@ -1,0 +1,16 @@
+[package]
+name = "just-core"
+version = "0.1.0"
+authors = ["Randy Schütt <rswhite4@googlemail.com>"]
+edition = "2018"
+
+[dependencies]
+serde = "1.0"
+serde_derive = "1.0"
+toml = "0.4"
+duct = "0.11"
+log = "0.4"
+
+[dependencies.semver]
+version = "0.9"
+features = ["serde"]
