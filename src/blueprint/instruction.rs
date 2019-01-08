@@ -24,7 +24,8 @@ pub struct Uninstall {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct Package {
-    pub alias: Vec<String>,
+    #[serde(default)]
+    pub name: String,
     #[serde(rename = "bin")]
     pub binaries: Vec<PathBuf>,
 }
@@ -33,12 +34,4 @@ pub struct Package {
 pub struct Download {
     pub url: String,
     pub version: Option<Version>,
-}
-
-impl Package {
-    pub fn get_first_alias(&self) -> &str {
-        self.alias
-            .first()
-            .expect("There is no alias for this package")
-    }
 }

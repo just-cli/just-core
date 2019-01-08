@@ -1,9 +1,10 @@
+pub use self::instruction::Package;
 use self::instruction::{Download, Install, Uninstall, Versions};
 use serde_derive::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub use self::instruction::Package;
+const BLUEPRINT_PATH: &str = "blueprints";
 
 pub mod instruction;
 
@@ -21,50 +22,40 @@ pub struct Blueprints {
 }
 
 impl Blueprints {
-    pub fn new() -> Self {
-        Self {
-            blueprints: HashMap::new(),
-        }
-    }
+    pub fn scan() -> Self {
+        use log::debug;
+        use walkdir::WalkDir;
 
-    pub fn read_from_path(&mut self, path: &Path) {
-        use log::{debug, warn};
-        use std::fs::read_dir;
-
-        debug!("Read blueprints from {:?}", path);
-
-        let blueprints: HashMap<String, PathBuf> = read_dir(path)
-            .and_then(|read_dir| {
-                let blueprints = read_dir
-                    .filter_map(|entry| entry.ok())
-                    .map(|dir| {
-                        let path = dir.path();
-                        let pkg = path
-                            .file_stem()
-                            .expect("Could not determine basename")
-                            .to_string_lossy();
-                        (pkg.to_string(), path)
-                    })
-                    .collect();
-
-                Ok(blueprints)
+        let path_buf = Path::new("..").join(BLUEPRINT_PATH);
+        let blueprints: HashMap<String, PathBuf> = WalkDir::new(path_buf)
+            .into_iter()
+            .filter_map(|entry| match entry {
+                Ok(dir) => {
+                    let path = dir.path();
+                    match path.extension() {
+                        Some(extension) if extension == "toml" => {
+                            let pkg = path
+                                .file_stem()
+                                .expect("Could not determine basename")
+                                .to_string_lossy();
+                            Some((pkg.to_string(), path.to_owned()))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
             })
-            .expect("Could not read packages");
+            .collect();
 
-        debug!("Read {} blueprints from {:?}", blueprints.len(), path);
+        debug!("Found {} blueprints", blueprints.len());
 
-        for (name, path) in blueprints {
-            if self.blueprints.contains_key(&name) {
-                warn!("Overriding package {}", name);
-            }
-
-            self.blueprints.insert(name, path);
-        }
+        Self { blueprints }
     }
 
-    pub fn load_blueprint(&self, name: &str) -> Option<Blueprint> {
+    pub fn load(&self, name: &str) -> Option<Blueprint> {
         if let Some(path) = self.blueprints.get(name) {
-            let blueprint = crate::toml::read_toml(path, &mut String::new());
+            let mut blueprint: Blueprint = crate::toml::read_toml(path, &mut String::new());
+            blueprint.package.name = name.to_owned();
 
             Some(blueprint)
         } else {

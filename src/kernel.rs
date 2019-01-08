@@ -1,6 +1,7 @@
 use crate::blueprint::Package;
 use crate::result::BoxedResult;
 use semver::Version;
+use semver::VersionReq;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -12,9 +13,119 @@ const PACKAGE_DIR: &str = "packages";
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Kernel {
     pub path: Folder,
+    #[serde(flatten)]
+    pub packages: InstalledPackages,
+    #[serde(flatten)]
+    pub downloads: AvailableDownloads,
+    #[serde(flatten)]
+    pub workspaces: AvailableWorkspaces,
+    #[serde(flatten)]
+    pub versions: AvailableVersions,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct InstalledPackages {
     packages: HashMap<String, Version>,
+}
+
+impl InstalledPackages {
+    pub fn add_package(&mut self, package: &Package, version: &Version) {
+        self.packages
+            .insert(package.name.to_owned(), version.to_owned());
+    }
+
+    pub fn is_installed(&self, package: &Package, req: Option<VersionReq>) -> bool {
+        let pkg_name = &package.name;
+        if let Some((_, version)) = self.packages.iter().find(|(name, _)| *name == pkg_name) {
+            match req {
+                Some(req) => req.matches(version),
+                None => true,
+            }
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct AvailableDownloads {
     downloads: HashMap<String, HashMap<Version, PathBuf>>,
-    workspace: HashMap<String, Workspace>,
+}
+
+impl AvailableDownloads {
+    pub fn add_download(&mut self, local: &LocalPackage, download_path: &Path) {
+        let name = local.package.name.as_str();
+
+        for binary in local.package.binaries.iter() {
+            let full_path = download_path.join(local.path).join(binary);
+
+            self.downloads
+                .entry(name.to_owned())
+                .and_modify(|items| {
+                    items
+                        .entry(local.version.to_owned())
+                        .and_modify(|path| *path = full_path.to_owned())
+                        .or_insert_with(|| full_path.to_owned());
+                })
+                .or_insert_with(|| {
+                    vec![(local.version.clone(), full_path.to_owned())]
+                        .into_iter()
+                        .collect()
+                });
+        }
+    }
+
+    pub fn get_download(&self, name: &str, req: &VersionReq) -> Option<(&Version, &PathBuf)> {
+        if let Some(ref downloads) = self.downloads.get(name) {
+            downloads.iter().find(|(version, _)| req.matches(version))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct AvailableVersions {
+    versions: HashMap<String, Vec<Version>>,
+}
+
+impl AvailableVersions {
+    pub fn add_version(&mut self, package: &Package, version: &Version) {
+        self.versions
+            .entry(package.name.to_owned())
+            .and_modify(|set| {
+                if !set.contains(version) {
+                    set.push(version.to_owned());
+                    set.sort_by(|a, b| b.cmp(a));
+                }
+            })
+            .or_insert_with(|| vec![version.to_owned()]);
+    }
+
+    pub fn get_all_versions_of(&self, package: &Package) -> Option<&Vec<Version>> {
+        self.versions.get(package.name.as_str())
+    }
+
+    pub fn get_latest_versions_of(&self, package: &Package) -> Option<&Version> {
+        match self.get_all_versions_of(package) {
+            Some(versions) => versions.first(),
+            None => None,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct AvailableWorkspaces {
+    workspaces: HashMap<String, Workspace>,
+}
+
+impl AvailableWorkspaces {
+    pub fn add_workspace(&mut self, name: &str, path: &Path) {
+        let mut ws = Workspace::default();
+        ws.path = path.to_owned();
+
+        self.workspaces.insert(name.to_owned(), ws);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,9 +154,10 @@ impl Default for Kernel {
 
         Self {
             path: folder,
-            packages: HashMap::new(),
-            downloads: HashMap::new(),
-            workspace: HashMap::new(),
+            packages: InstalledPackages::default(),
+            downloads: AvailableDownloads::default(),
+            workspaces: AvailableWorkspaces::default(),
+            versions: AvailableVersions::default(),
         }
     }
 }
@@ -58,8 +170,8 @@ impl Drop for Kernel {
 
 impl Kernel {
     pub fn load() -> Self {
-        use log::debug;
         use crate::toml::read_toml;
+        use log::debug;
 
         //  We have to use '/..' because we are in the bin folder
         let path = Path::new("../").join(CONFIG_FILE);
@@ -74,33 +186,15 @@ impl Kernel {
         }
     }
 
-    pub fn add_package(&mut self, local: &LocalPackage) {
-        let alias = local.package.get_first_alias();
-
-        self.packages.insert(alias.to_owned(), local.version.clone());
-    }
-
-    pub fn add_download(&mut self, local: &LocalPackage) {
-        let alias = local.package.get_first_alias();
-
-        for binary in local.package.binaries.iter() {
-            let full_path = self.path.downloads.join(local.path).join(binary);
-
-            self.downloads
-                .entry(alias.to_owned())
-                .and_modify(|items| {
-                    items
-                        .entry(local.version.to_owned())
-                        .and_modify(|path| *path = full_path.to_owned())
-                        .or_insert_with(|| full_path.to_owned());
-                })
-                .or_insert_with(|| {
-                    vec![(local.version.clone(), full_path.to_owned())]
-                        .into_iter()
-                        .collect()
-                });
-        }
-    }
+//    pub fn add_package(&mut self, local: &LocalPackage) {
+//        self.packages.add_package(local.package, local.version);
+//        self.versions.add_version(local.package, local.version);
+//    }
+//
+//    pub fn add_download(&mut self, local: &LocalPackage) {
+//        self.downloads.add_download(local, &self.path.downloads);
+//        self.add_package(local);
+//    }
 
     pub fn create_shims(&self, local: &LocalPackage) -> BoxedResult<()> {
         use log::info;
@@ -116,13 +210,6 @@ impl Kernel {
         }
 
         Ok(())
-    }
-
-    pub fn add_workspace(&mut self, name: &str, path: &Path) {
-        let mut ws = Workspace::default();
-        ws.path = path.to_owned();
-
-        self.workspace.insert(name.to_owned(), ws);
     }
 
     pub fn save(&self) {
@@ -172,7 +259,7 @@ pub fn init() -> BoxedResult<Folder> {
                 home: home_path.to_owned(),
                 bin: bin_path.to_owned(),
                 downloads: download_path,
-                packages: package_path
+                packages: package_path,
             };
 
             Ok(folder)
