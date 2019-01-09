@@ -1,4 +1,4 @@
-use crate::blueprint::Package;
+use crate::manifest::Package;
 use crate::result::BoxedResult;
 use semver::Version;
 use semver::VersionReq;
@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 
 const CONFIG_FILE: &str = "just.toml";
 const SHIM_EXE: &str = "shim.exe";
-const PACKAGE_DIR: &str = "packages";
+
+const MANIFEST_DIR: &str = "manifests";
+const DOWNLOAD_DIR: &str = "downloads";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Kernel {
@@ -130,10 +132,10 @@ impl AvailableWorkspaces {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Folder {
-    pub home: PathBuf,
-    pub bin: PathBuf,
-    pub downloads: PathBuf,
-    pub packages: PathBuf,
+    pub root_path: PathBuf,
+    pub bin_path: PathBuf,
+    pub download_path: PathBuf,
+    pub manifest_path: PathBuf,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -186,20 +188,10 @@ impl Kernel {
         }
     }
 
-//    pub fn add_package(&mut self, local: &LocalPackage) {
-//        self.packages.add_package(local.package, local.version);
-//        self.versions.add_version(local.package, local.version);
-//    }
-//
-//    pub fn add_download(&mut self, local: &LocalPackage) {
-//        self.downloads.add_download(local, &self.path.downloads);
-//        self.add_package(local);
-//    }
-
     pub fn create_shims(&self, local: &LocalPackage) -> BoxedResult<()> {
         use log::info;
 
-        let pkg_path = self.path.downloads.join(local.path);
+        let pkg_path = self.path.download_path.join(local.path);
         for binary in local.package.binaries.iter() {
             let binary_path = pkg_path.join(binary);
             let binary_name = binary.file_name().expect("No Filename").to_str().unwrap();
@@ -215,7 +207,7 @@ impl Kernel {
     pub fn save(&self) {
         use crate::toml::write_toml;
 
-        let path = self.path.home.join(CONFIG_FILE);
+        let path = self.path.root_path.join(CONFIG_FILE);
 
         write_toml(&path, &self)
     }
@@ -224,24 +216,22 @@ impl Kernel {
 pub fn init() -> BoxedResult<Folder> {
     use std::env::current_exe;
 
-    let current_path = current_exe().expect("No running exe detected");
-    let bin_path = current_path
-        .parent()
-        .expect("just.exe is not in a bin path?");
+    let exe_path = current_exe().expect("No running exe detected");
+    let bin_path = exe_path.parent().expect("just.exe is not in a bin path?");
     assert!(
         bin_path.exists(),
-        "Invalid bin path: bin path {:?} does not exist",
+        "Invalid bin path: {:?} does not exist",
         bin_path
     );
-    let home_path = bin_path.parent().expect("bin path is not in another path?");
-    let package_path = home_path.join(PACKAGE_DIR);
+    let root_path = bin_path.parent().expect("bin path is not in another path?");
+    let manifest_path = root_path.join(MANIFEST_DIR);
     assert!(
-        package_path.exists(),
-        "Invalid package path: package path {:?} does not exist",
-        package_path
+        manifest_path.exists(),
+        "Invalid manifest path: {:?} does not exist",
+        manifest_path
     );
 
-    create_download_directory_in(&home_path)
+    create_download_directory_in(&root_path)
         .and_then(|download_path| {
             use log::info;
 
@@ -256,18 +246,18 @@ pub fn init() -> BoxedResult<Folder> {
         })
         .and_then(|download_path| {
             let folder = Folder {
-                home: home_path.to_owned(),
-                bin: bin_path.to_owned(),
-                downloads: download_path,
-                packages: package_path,
+                root_path: root_path.to_owned(),
+                bin_path: bin_path.to_owned(),
+                download_path,
+                manifest_path,
             };
 
             Ok(folder)
         })
 }
 
-fn create_download_directory_in(home_path: &Path) -> BoxedResult<PathBuf> {
-    let download_path = home_path.join("downloads");
+fn create_download_directory_in(root_path: &Path) -> BoxedResult<PathBuf> {
+    let download_path = root_path.join(DOWNLOAD_DIR);
     if !download_path.exists() {
         use std::fs::create_dir;
 
@@ -297,7 +287,7 @@ impl<'a> Shim<'a> {
             .file_stem()
             .expect("No Basename");
 
-        File::create(config.path.bin.join(basename))
+        File::create(config.path.bin_path.join(basename))
             .and_then(|mut file| {
                 use std::io::Write;
 
@@ -308,8 +298,8 @@ impl<'a> Shim<'a> {
                 use std::fs::copy;
 
                 copy(
-                    config.path.bin.join(SHIM_EXE),
-                    config.path.bin.join(self.binary_name),
+                    config.path.bin_path.join(SHIM_EXE),
+                    config.path.bin_path.join(self.binary_name),
                 )
                 .and_then(|_| Ok(()))
             })
