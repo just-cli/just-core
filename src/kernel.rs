@@ -31,6 +31,10 @@ pub struct InstalledPackages {
 }
 
 impl InstalledPackages {
+    pub fn get_packages(&self) -> &HashMap<String, Version> {
+        &self.packages
+    }
+
     pub fn add_package(&mut self, package: &Package, version: &Version) {
         self.packages
             .insert(package.name.to_owned(), version.to_owned());
@@ -55,6 +59,10 @@ pub struct AvailableDownloads {
 }
 
 impl AvailableDownloads {
+    pub fn get_downloads(&self) -> &HashMap<String, HashMap<Version, PathBuf>> {
+        &self.downloads
+    }
+
     pub fn add_download(&mut self, local: &LocalPackage, download_path: &Path) {
         let name = local.package.name.as_str();
 
