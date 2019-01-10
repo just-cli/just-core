@@ -35,13 +35,16 @@ impl InstalledPackages {
         &self.packages
     }
 
+    pub fn remove_package(&mut self, pkg_name: &str) -> Option<Version> {
+        self.packages.remove(pkg_name)
+    }
+
     pub fn add_package(&mut self, package: &Package, version: &Version) {
         self.packages
             .insert(package.name.to_owned(), version.to_owned());
     }
 
-    pub fn is_installed(&self, package: &Package, req: Option<VersionReq>) -> bool {
-        let pkg_name = &package.name;
+    pub fn is_installed(&self, pkg_name: &str, req: Option<VersionReq>) -> bool {
         if let Some((_, version)) = self.packages.iter().find(|(name, _)| *name == pkg_name) {
             match req {
                 Some(req) => req.matches(version),
@@ -196,28 +199,62 @@ impl Kernel {
         }
     }
 
-    pub fn create_shims(&self, local: &LocalPackage) -> BoxedResult<()> {
-        use log::info;
-
-        let pkg_path = self.path.download_path.join(local.path);
-        for binary in local.package.binaries.iter() {
-            let binary_path = pkg_path.join(binary);
-            let binary_name = binary.file_name().expect("No Filename").to_str().unwrap();
-
-            info!("Create shim for {}", binary_name);
-            let shim = Shim::new(binary_name, binary_path);
-            shim.create(&self)?;
-        }
-
-        Ok(())
-    }
-
     pub fn save(&self) {
         use crate::toml::write_toml;
 
         let path = self.path.root_path.join(CONFIG_FILE);
 
         write_toml(&path, &self)
+    }
+}
+
+pub trait PackageShims {
+    fn create_shims(&self, local: &LocalPackage) -> BoxedResult<()>;
+    fn remove_shims(&self, package: &Package) -> BoxedResult<()>;
+}
+
+impl PackageShims for Kernel {
+    fn create_shims(&self, local: &LocalPackage) -> BoxedResult<()> {
+        use log::info;
+
+        info!("Create shims for package {}", local.package.name);
+
+        let pkg_path = self.path.download_path.join(local.path);
+        for binary_path in local.package.binaries.iter() {
+            let binary_path = pkg_path.join(binary_path);
+            let binary_name = binary_path
+                .file_name()
+                .expect("No Filename for Binary")
+                .to_str()
+                .unwrap();
+
+            info!(" - Create shim for {}", binary_name);
+            let shim = Shim::new(binary_name, &binary_path);
+            shim.create(&self.path)?;
+        }
+
+        Ok(())
+    }
+
+    fn remove_shims(&self, package: &Package) -> BoxedResult<()> {
+        use log::info;
+        use std::fs::remove_file;
+
+        info!("Remove shims for package {}", package.name);
+
+        for binary_path in package.binaries.iter() {
+            let binary_name = binary_path
+                .file_name()
+                .expect("No Filename for Binary")
+                .to_str()
+                .unwrap();
+            let binary_path = self.path.bin_path.join(binary_name);
+
+            info!(" - Remove shim for {}", binary_name);
+            remove_file(binary_path)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -277,25 +314,25 @@ fn create_download_directory_in(root_path: &Path) -> BoxedResult<PathBuf> {
 
 struct Shim<'a> {
     binary_name: &'a str,
-    binary_path: PathBuf,
+    binary_path: &'a Path,
 }
 
 impl<'a> Shim<'a> {
-    fn new(binary_name: &'a str, binary_path: PathBuf) -> Self {
+    fn new(binary_name: &'a str, binary_path: &'a Path) -> Self {
         Self {
             binary_name,
             binary_path,
         }
     }
 
-    fn create(&self, config: &Kernel) -> BoxedResult<()> {
+    fn create(&self, folder: &Folder) -> BoxedResult<()> {
         use std::fs::File;
 
         let basename = Path::new(self.binary_name)
             .file_stem()
             .expect("No Basename");
 
-        File::create(config.path.bin_path.join(basename))
+        File::create(folder.bin_path.join(basename))
             .and_then(|mut file| {
                 use std::io::Write;
 
@@ -306,8 +343,8 @@ impl<'a> Shim<'a> {
                 use std::fs::copy;
 
                 copy(
-                    config.path.bin_path.join(SHIM_EXE),
-                    config.path.bin_path.join(self.binary_name),
+                    folder.bin_path.join(SHIM_EXE),
+                    folder.bin_path.join(self.binary_name),
                 )
                 .and_then(|_| Ok(()))
             })
