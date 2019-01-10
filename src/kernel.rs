@@ -35,6 +35,10 @@ impl InstalledPackages {
         &self.packages
     }
 
+    pub fn get_package_version(&self, pkg_name: &str) -> Option<&Version> {
+        self.packages.get(pkg_name)
+    }
+
     pub fn remove_package(&mut self, pkg_name: &str) -> Option<Version> {
         self.packages.remove(pkg_name)
     }
