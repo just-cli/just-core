@@ -20,8 +20,6 @@ pub struct Kernel {
     #[serde(flatten)]
     pub downloads: AvailableDownloads,
     #[serde(flatten)]
-    pub workspaces: AvailableWorkspaces,
-    #[serde(flatten)]
     pub versions: AvailableVersions,
 }
 
@@ -131,20 +129,6 @@ impl AvailableVersions {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct AvailableWorkspaces {
-    workspaces: HashMap<String, Workspace>,
-}
-
-impl AvailableWorkspaces {
-    pub fn add_workspace(&mut self, name: &str, path: &Path) {
-        let mut ws = Workspace::default();
-        ws.path = path.to_owned();
-
-        self.workspaces.insert(name.to_owned(), ws);
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Folder {
     pub root_path: PathBuf,
@@ -173,7 +157,6 @@ impl Default for Kernel {
             path: folder,
             packages: InstalledPackages::default(),
             downloads: AvailableDownloads::default(),
-            workspaces: AvailableWorkspaces::default(),
             versions: AvailableVersions::default(),
         }
     }
@@ -281,18 +264,18 @@ pub fn init() -> BoxedResult<Folder> {
     );
 
     create_download_directory_in(&root_path)
-        .and_then(|download_path| {
-            use log::info;
-
-            let mut win_path = crate::system::WinPath::inherit();
-            if win_path.exists(&bin_path) {
-                Ok(download_path)
-            } else {
-                info!("Add {:?} to PATH", bin_path);
-                win_path.append(&bin_path);
-                win_path.save().and_then(|_| Ok(download_path))
-            }
-        })
+        //        .and_then(|download_path| {
+        //            use log::info;
+        //
+        //            let mut win_path = crate::system::WinPath::inherit();
+        //            if win_path.exists(&bin_path) {
+        //                Ok(download_path)
+        //            } else {
+        //                info!("Add {:?} to PATH", bin_path);
+        //                win_path.append(&bin_path);
+        //                win_path.save().and_then(|_| Ok(download_path))
+        //            }
+        //        })
         .and_then(|download_path| {
             let folder = Folder {
                 root_path: root_path.to_owned(),
